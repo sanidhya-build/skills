@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>__TITLE__</title>
+<style>
+  /* =========================================================
+     DESIGN TOKENS — safe to retune colors, unsafe to remove
+     the mechanisms (arc-over bezier, svg-repaint-last, nowrap
+     labels) without reading references/design-system.md first.
+     ========================================================= */
+  :root{
+    --bg:#f6f6f3;
+    --bg-raise:#efefec;
+    --surface:#ffffff;
+    --border:#dcdcd6;
+    --border-strong:#bcbcb4;
+    --text:#17171a;
+    --text-dim:#68685f;
+    --text-faint:#9c9c92;
+    --purple:#5b4fe0;
+    --purple-soft:#eeecfb;
+    --sage:#5e8a72;
+    --sage-soft:#e8f0ea;
+    --amber:#a97317;
+    --amber-soft:#f7ecd7;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  ::selection{background:var(--purple-soft);}
+
+  .app{max-width:1820px;margin:0 auto;padding:20px 28px 80px;}
+
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;gap:24px;
+    padding-bottom:16px;margin-bottom:22px;border-bottom:1px solid var(--border);
+    flex-wrap:wrap;
+  }
+  .topbar h1{font-size:16px;margin:0;font-weight:700;letter-spacing:-0.01em;}
+  .topbar .sub{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);letter-spacing:.06em;text-transform:uppercase;margin-top:3px;}
+  .tabs{display:flex;gap:4px;background:var(--bg-raise);padding:3px;border:1px solid var(--border);border-radius:6px;}
+  .tab{
+    font-family:var(--mono);font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+    padding:7px 14px;border-radius:4px;cursor:pointer;color:var(--text-dim);border:none;background:transparent;
+  }
+  .tab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:600;}
+  .tab:hover:not(.active){color:var(--text);}
+
+  .view{display:none;}
+  .view.active{display:block;}
+
+  /* ---------- step controller ---------- */
+  .stepbar{
+    position:sticky;top:0;z-index:40;background:var(--bg);
+    display:flex;align-items:center;gap:14px;padding:12px 0 16px;
+  }
+  .legend{display:flex;gap:16px;flex-wrap:wrap;padding:0 0 14px;}
+  .legend .item{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;}
+  .legend .swatch{width:16px;height:0;border-top:2px dashed;flex:none;}
+  .legend .swatch.solid{border-top-style:solid;}
+  .stepbtn{
+    width:34px;height:34px;border-radius:50%;border:1px solid var(--border-strong);
+    background:var(--surface);color:var(--text);font-size:15px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:.15s;
+  }
+  .stepbtn:hover{background:var(--purple);color:#fff;border-color:var(--purple);}
+  .stepbtn:disabled{opacity:.3;cursor:default;background:var(--surface);color:var(--text);border-color:var(--border-strong);}
+  .stepinfo{flex:1;min-width:0;}
+  .stepinfo .n{font-family:var(--mono);font-size:10.5px;color:var(--purple);letter-spacing:.08em;text-transform:uppercase;font-weight:700;}
+  .stepinfo .t{font-size:14.5px;font-weight:700;margin-top:1px;}
+  .stepinfo .w{font-size:12.5px;color:var(--text-dim);margin-top:2px;max-width:900px;}
+  .steptrack{display:flex;gap:3px;align-items:center;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--border-strong);cursor:pointer;flex:none;}
+  .dot.done{background:var(--purple);}
+  .dot.now{background:var(--purple);width:9px;height:9px;box-shadow:0 0 0 3px var(--purple-soft);}
+  .jumpall{
+    font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--text-dim);border:1px solid var(--border);background:var(--surface);
+    padding:6px 10px;border-radius:4px;cursor:pointer;white-space:nowrap;
+  }
+  .jumpall:hover{border-color:var(--purple);color:var(--purple);}
+
+  /* ---------- canvas ---------- */
+  .canvas-wrap{position:relative;overflow-x:auto;padding-bottom:10px;}
+  .canvas{position:relative;min-width:1720px;padding:10px 4px 40px;}
+  svg#lines{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;}
+
+  .node{
+    position:relative;background:var(--surface);border:1px solid var(--border);
+    border-radius:3px;padding:10px 12px;box-shadow:0 1px 2px rgba(20,20,10,.05);
+    opacity:0;transform:translateY(6px);pointer-events:none;
+    transition:opacity .45s ease, transform .45s ease, box-shadow .15s, border-color .15s;
+    cursor:pointer;
+  }
+  .node.in{opacity:1;transform:translateY(0);pointer-events:auto;}
+  .node:hover{border-color:var(--purple);box-shadow:0 2px 10px rgba(91,79,224,.15);}
+  .node .kicker{font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-faint);margin-bottom:3px;}
+  .node .title{font-size:13px;font-weight:700;letter-spacing:-.01em;}
+  .node .why{font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.4;max-width:230px;}
+  .node .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;}
+  .chip{font-family:var(--mono);font-size:9.5px;color:var(--text-dim);background:var(--bg);border:1px solid var(--border);padding:1.5px 6px;border-radius:2px;white-space:nowrap;}
+  .node.tiny{padding:6px 9px;}
+  .node.tiny .title{font-size:11px;}
+  .node.tiny .kicker{margin-bottom:1px;}
+  .node.small .why{display:none;}
+  /* generic "flag" marker: set data-flag="deviation" / "tech debt" / "risk" / anything.
+     Use sparingly — one or two per diagram, for the thing you'd actually say out loud. */
+  .node.flag{border-color:var(--amber);}
+  .node.flag::after{
+    content:"⚑ " attr(data-flag);font-family:var(--mono);font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;
+    position:absolute;top:-8px;right:8px;background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber);
+    padding:1px 6px;border-radius:8px;white-space:nowrap;
+  }
+
+  .actor{background:var(--bg-raise);}
+
+  /* ---------- nested structure boxes ----------
+     l1/l2 = outer context, faint, purely organizational (e.g. subscription > region,
+             or repo > app). emphasis = the one boundary worth calling out with color
+             (e.g. a VNet, or a package/module boundary that really matters). l4 = a
+             row of parallel sibling groups inside emphasis (e.g. subnets, or layers).
+             cluster = a meaningful sub-grouping inside an l4 group (e.g. an env/cluster,
+             or a package of tightly-coupled files). Rename labels freely; keep nesting
+             shallow — 4-5 levels max or it stops being readable at a glance. */
+  .boundary{
+    position:relative;border:1.5px dashed var(--border-strong);border-radius:6px;
+    padding:22px 18px 18px;opacity:0;transition:opacity .5s ease;pointer-events:none;
+  }
+  .boundary.in{opacity:1;pointer-events:auto;}
+  .boundary>.label{
+    position:absolute;top:-9px;left:14px;background:var(--bg);padding:0 8px;white-space:nowrap;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);
+  }
+  .boundary.l1>.label,.boundary.l2>.label{color:var(--text-faint);}
+  .boundary.emphasis{border-color:#9b93e8;}
+  .boundary.emphasis>.label{color:var(--purple);}
+  .boundary.l4{background:rgba(255,255,255,.35);min-width:212px;}
+  .boundary.cluster{border-color:var(--sage);background:var(--sage-soft);}
+  .boundary.cluster>.label{color:var(--sage);}
+
+  .top-row{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:34px;padding:0 20px;flex-wrap:wrap;gap:16px;}
+
+  .l1-body{display:flex;flex-direction:column;gap:26px;}
+  .groups-row{display:flex;gap:20px;align-items:flex-start;flex-wrap:nowrap;}
+  .group-inner{display:flex;flex-direction:column;gap:8px;}
+  .entity-row{display:flex;gap:14px;flex-wrap:wrap;padding-top:4px;}
+  .footnote-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:2px;}
+
+  /* ---------- detail drawer ---------- */
+  .drawer{
+    position:fixed;top:0;right:0;height:100%;width:340px;background:var(--surface);
+    border-left:1px solid var(--border);box-shadow:-8px 0 24px rgba(0,0,0,.08);
+    transform:translateX(100%);transition:transform .25s ease;z-index:100;padding:22px;overflow-y:auto;
+  }
+  .drawer.open{transform:translateX(0);}
+  .drawer .close{position:absolute;top:16px;right:16px;cursor:pointer;font-family:var(--mono);font-size:18px;color:var(--text-faint);background:none;border:none;}
+  .drawer .kicker{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--purple);}
+  .drawer h2{font-size:19px;margin:6px 0 10px;}
+  .drawer .why{font-size:13px;color:var(--text-dim);line-height:1.55;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border);}
+  .drawer .cfglabel{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);margin-bottom:8px;}
+  .drawer ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;}
+  .drawer li{font-family:var(--mono);font-size:12px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:6px 9px;}
+  .scrim{position:fixed;inset:0;background:rgba(20,20,15,.15);z-index:90;opacity:0;pointer-events:none;transition:opacity .25s;}
+  .scrim.open{opacity:1;pointer-events:auto;}
+
+  /* ---------- tab-1 checklist / overview ---------- */
+  .checklist-wrap{max-width:920px;}
+  .cl-group{margin-bottom:30px;}
+  .cl-group h3{
+    font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--purple);
+    margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);
+  }
+  .cl-item{display:flex;gap:12px;align-items:flex-start;padding:10px 4px;border-bottom:1px solid #ecece7;cursor:pointer;}
+  .cl-item:hover{background:var(--bg-raise);}
+  .cl-box{
+    width:16px;height:16px;flex:none;margin-top:2px;border:1.5px solid var(--border-strong);border-radius:3px;
+    display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent;
+  }
+  .cl-item.checked .cl-box{background:var(--purple);border-color:var(--purple);color:#fff;}
+  .cl-item.checked .cl-text{color:var(--text-faint);text-decoration:line-through;text-decoration-color:var(--border-strong);}
+  .cl-text{font-size:13.5px;line-height:1.5;}
+  .cl-text b{font-weight:700;}
+  .cl-note{margin-top:14px;font-size:12px;color:var(--text-dim);background:var(--purple-soft);border:1px solid #d6d1f7;padding:10px 14px;border-radius:5px;}
+  .headline{max-width:760px;margin-bottom:28px;}
+  .headline .k{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-faint);}
+  .headline h2{font-size:22px;margin:6px 0 8px;}
+  .headline p{font-size:13.5px;color:var(--text-dim);line-height:1.6;margin:0;}
+
+  /* ---------- tab-3 pipeline ---------- */
+  .pipe{display:flex;gap:0;align-items:stretch;overflow-x:auto;padding:10px 2px 30px;}
+  .pipe-step{min-width:260px;max-width:260px;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:16px;position:relative;opacity:.3;transition:.3s;}
+  .pipe-step.in{opacity:1;}
+  .pipe-step + .pipe-step{margin-left:34px;}
+  .pipe-step::before{content:"→";position:absolute;left:-28px;top:50%;transform:translateY(-50%);color:var(--border-strong);font-size:18px;}
+  .pipe-step .num{font-family:var(--mono);font-size:10px;color:var(--purple);letter-spacing:.08em;}
+  .pipe-step h4{font-size:13.5px;margin:4px 0 8px;}
+  .pipe-step p{font-size:11.5px;color:var(--text-dim);line-height:1.5;margin:0 0 10px;}
+  .pipe-step code{display:block;font-family:var(--mono);font-size:10px;background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:6px 8px;white-space:pre-wrap;word-break:break-all;color:var(--text);line-height:1.5;}
+
+  footer.hint{font-family:var(--mono);font-size:10px;color:var(--text-faint);text-align:center;margin-top:24px;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div>
+      <h1>__TITLE__</h1>
+      <div class="sub">__SUBTITLE__</div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-view="v-overview">__TAB1_LABEL__</button>
+      <button class="tab" data-view="v-build">__TAB2_LABEL__</button>
+      <button class="tab" data-view="v-flow">__TAB3_LABEL__</button>
+    </div>
+  </div>
+
+  <!-- ============ TAB 1 : OVERVIEW / CHECKLIST ============
+       Good for: prerequisites, tech stack, baseline requirements, "why this exists".
+       If a checklist genuinely doesn't fit your subject, replace #checklist's contents
+       with plain narrative <p> tags instead — don't force a checklist shape. -->
+  <div class="view active" id="v-overview">
+    <div class="headline">
+      <div class="k">__TAB1_EYEBROW__</div>
+      <h2>__TAB1_HEADLINE__</h2>
+      <p>__TAB1_DEK__</p>
+    </div>
+    <div class="checklist-wrap" id="checklist"></div>
+  </div>
+
+  <!-- ============ TAB 2 : THE BUILD / ARCHITECTURE DIAGRAM ============
+       This is the main deliverable. Everything here is driven by the DATA section
+       in the <script> below — REVEAL, STEP_META, CONNECTIONS, NODE_DETAIL, LEGEND.
+       The HTML structure below is a worked example (an actor, a 3-level nested
+       structure, a cluster, a row of standalone entities, a footnote). Copy this
+       shape and relabel it for your subject; see references/data-schema.md. -->
+  <div class="view" id="v-build">
+    <div class="stepbar">
+      <button class="stepbtn" id="prevBtn">‹</button>
+      <div class="stepinfo">
+        <div class="n" id="stepN">Step 0 / 0</div>
+        <div class="t" id="stepT">—</div>
+        <div class="w" id="stepW">—</div>
+      </div>
+      <div class="steptrack" id="track"></div>
+      <button class="stepbtn" id="nextBtn">›</button>
+      <button class="jumpall" id="jumpAll">Show full diagram</button>
+      <button class="jumpall" id="jumpReset">Reset</button>
+    </div>
+    <div class="legend" id="legend"></div>
+
+    <div class="canvas-wrap">
+      <div class="canvas" id="canvas">
+        <svg id="lines"></svg>
+
+        <div class="top-row">
+          <div class="node actor in" id="n-actor-1">
+            <div class="kicker">External actor</div>
+            <div class="title">Example: end user</div>
+            <div class="why">Replace or remove — 0 to 3 actor boxes are fine here.</div>
+          </div>
+          <div class="node actor" id="n-actor-2">
+            <div class="kicker">External actor · Step 3</div>
+            <div class="title">Example: third-party system</div>
+            <div class="why">Anything outside the boundary you're explaining goes here.</div>
+          </div>
+        </div>
+
+        <div class="boundary l1 in" id="b-l1">
+          <span class="label">Level 1 — e.g. Subscription / Repository</span>
+          <div class="boundary l2 in" id="b-l2">
+            <span class="label">Level 2 — e.g. Region / App</span>
+            <div class="boundary emphasis" id="b-emphasis">
+              <span class="label">Emphasis boundary — e.g. VNet / core package — Step 1</span>
+              <div class="l1-body">
+                <div class="groups-row">
+                  <div class="boundary l4" id="b-group-a">
+                    <span class="label">Group A — e.g. a subnet / a layer</span>
+                    <div class="group-inner">
+                      <div class="node small" id="n-example-1">
+                        <div class="kicker">Category · Step 2</div>
+                        <div class="title">Example node</div>
+                        <div class="chips"><span class="chip">key fact</span><span class="chip">key fact</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="boundary l4" id="b-group-b">
+                    <span class="label">Group B</span>
+                    <div class="boundary cluster" id="b-cluster">
+                      <span class="label">Cluster — e.g. an environment / tightly-coupled module — Step 3</span>
+                      <div class="group-inner">
+                        <div class="node small" id="n-example-2">
+                          <div class="kicker">Category · Step 4</div>
+                          <div class="title">Example node</div>
+                          <div class="chips"><span class="chip">key fact</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="entity-row">
+                  <div class="node" id="n-example-3">
+                    <div class="kicker">Category · Step 2</div>
+                    <div class="title">Standalone entity</div>
+                    <div class="why">One-line reason this exists — the "why", not the "what".</div>
+                    <div class="chips"><span class="chip">key fact</span><span class="chip">key fact</span></div>
+                  </div>
+                </div>
+                <div class="footnote-row" id="footnote-row">
+                  <div class="node tiny" id="n-footnote">
+                    <div class="kicker">Step 1</div>
+                    <div class="title">Footnote-level detail</div>
+                  </div>
+                  <span class="annot">e.g. shared config, DNS zones, a design constraint that applies broadly</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <footer class="hint">click any box for full detail · ← → to step</footer>
+  </div>
+
+  <!-- ============ TAB 3 : FLOW / EXECUTION PIPELINE ============
+       Good for: deployment steps, a request lifecycle, a build pipeline, a data
+       pipeline run. Linear, ordered, with real commands/snippets where you have them. -->
+  <div class="view" id="v-flow">
+    <div class="headline">
+      <div class="k">__TAB3_EYEBROW__</div>
+      <h2>__TAB3_HEADLINE__</h2>
+      <p>__TAB3_DEK__</p>
+    </div>
+    <div class="stepbar" style="padding-top:0;">
+      <button class="stepbtn" id="prevBtn2">‹</button>
+      <div class="stepinfo">
+        <div class="n" id="stepN2">Step 0 / 0</div>
+        <div class="t" id="stepT2">—</div>
+      </div>
+      <button class="stepbtn" id="nextBtn2">›</button>
+      <button class="jumpall" id="jumpAll2">Show full pipeline</button>
+    </div>
+    <div class="pipe" id="pipe"></div>
+  </div>
+
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer">
+  <button class="close" id="drawerClose">×</button>
+  <div class="kicker" id="dwKicker">—</div>
+  <h2 id="dwTitle">—</h2>
+  <div class="why" id="dwWhy">—</div>
+  <div class="cfglabel">Key detail</div>
+  <ul id="dwList"></ul>
+</div>
+
+<script>
+/* =========================================================
+   DATA — fill this in for your subject. See
+   references/data-schema.md for the full annotated schema
+   and two worked examples (infra deployment + codebase).
+   Everything below is a minimal placeholder so the scaffold
+   renders something sensible before you customize it.
+   ========================================================= */
+
+// One line per node id -> the drawer content shown on click.
+const NODE_DETAIL = {
+  'n-actor-1':  {kicker:'External actor', title:'Example: end user', why:'Replace with the real actor.', cfg:['fact one','fact two']},
+  'n-example-1':{kicker:'Category · Step 2', title:'Example node', why:'The one-line reason this exists.', cfg:['key config or file path','another fact']},
+  'n-example-2':{kicker:'Category · Step 4', title:'Example node', why:'Why this exists.', cfg:['fact']},
+  'n-example-3':{kicker:'Category · Step 2', title:'Standalone entity', why:'Why this exists.', cfg:['fact','fact']},
+  'n-footnote': {kicker:'Step 1', title:'Footnote-level detail', why:'Something that applies broadly rather than being one node.', cfg:['detail']},
+};
+
+// step index -> {t: short title, w: one/two sentence narration for the step bar}
+const STEP_META = {
+  0:{t:'Start', w:'Nothing exists yet except the outside actors.'},
+  1:{t:'Foundational piece', w:'The thing everything else depends on.'},
+  2:{t:'First real components', w:'The pieces that plug into the foundation.'},
+  3:{t:'A meaningful grouping', w:'Why these particular things are grouped together.'},
+  4:{t:'It comes alive', w:'The moment the pieces start actually talking to each other.'},
+};
+const MAX_STEP = Math.max(...Object.keys(STEP_META).map(Number));
+
+// element id -> the step at which it should appear. Every id used in the HTML
+// above (nodes AND boundaries) needs an entry, or it'll never reveal.
+const REVEAL = {
+  'n-actor-1':0, 'n-actor-2':3,
+  'b-l1':0, 'b-l2':0, 'b-emphasis':1,
+  'b-group-a':2, 'b-group-b':2, 'b-cluster':3,
+  'n-example-1':2, 'n-example-2':4, 'n-example-3':2, 'n-footnote':1,
+};
+
+// connections: from/to must be element ids (nodes or boundaries both work as anchors).
+// color is one of purple|sage|amber|gray — see the legend below and
+// references/data-schema.md for suggested meanings per color.
+// step = when the line should appear (usually the later of the two endpoints' steps).
+// labelT (0-1, optional) = where along the curve the label sits; default 0.5 (midpoint).
+// Nudge this when a label lands on top of unrelated box text — see
+// references/design-system.md "visual QA loop" before fighting it by eye alone.
+const CONNECTIONS = [
+  {from:'n-actor-1', to:'n-example-3', label:'example request', color:'purple', dash:false, step:2},
+  {from:'n-example-3', to:'n-example-1', label:'example call', color:'sage', dash:false, step:2},
+  {from:'n-actor-2', to:'n-example-2', label:'example integration', color:'gray', dash:true, step:4},
+];
+
+// legend shown under the step bar — keep this in sync with the colors you actually use.
+const LEGEND = [
+  {color:'purple', label:'primary flow', dash:false},
+  {color:'sage', label:'internal calls', dash:false},
+  {color:'amber', label:'identity / cross-cutting', dash:true},
+  {color:'gray', label:'auth / secondary', dash:true},
+];
+
+// Tab 1 — checklist. Replace with narrative <p> tags in #checklist if a checklist
+// doesn't fit (e.g. a "why this exists" story reads better as prose).
+const CHECKLIST = [
+  {group:'Example group', items:[
+    'Replace with real prerequisite / tech-stack / design-principle items',
+    'One line each — use <b>bold</b> for the load-bearing word',
+  ]},
+];
+
+// Tab 3 — linear pipeline (deployment steps, request lifecycle, build steps...).
+const PIPE = [
+  {t:'First step', p:'One or two sentences on what happens and why.', code:'example command or snippet'},
+  {t:'Second step', p:'…', code:'…'},
+];
+
+/* =========================================================
+   Everything below this line is the reusable engine.
+   You should not need to edit it — see references/design-system.md
+   if you think you do.
+   ========================================================= */
+
+// ---- Tab 1 checklist render ----
+const clWrap = document.getElementById('checklist');
+CHECKLIST.forEach(g=>{
+  const gd = document.createElement('div'); gd.className='cl-group';
+  const h = document.createElement('h3'); h.textContent = g.group; gd.appendChild(h);
+  g.items.forEach(txt=>{
+    const it = document.createElement('div'); it.className='cl-item';
+    it.innerHTML = `<div class="cl-box">✓</div><div class="cl-text">${txt}</div>`;
+    it.addEventListener('click',()=>it.classList.toggle('checked'));
+    gd.appendChild(it);
+  });
+  clWrap.appendChild(gd);
+});
+
+const COLORS = {purple:'#5b4fe0', sage:'#5e8a72', amber:'#a97317', gray:'#9c9c92'};
+
+// ---- Tabs ----
+document.querySelectorAll('.tab').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='v-build'){ setTimeout(drawLines,50); }
+  });
+});
+
+// ---- Legend render ----
+const legendEl = document.getElementById('legend');
+LEGEND.forEach(l=>{
+  const item = document.createElement('div'); item.className='item';
+  item.innerHTML = `<span class="swatch ${l.dash?'':'solid'}" style="border-color:${COLORS[l.color]||l.color}"></span>${l.label}`;
+  legendEl.appendChild(item);
+});
+
+// ---- Step engine (Tab 2) ----
+let step = 0;
+const trackEl = document.getElementById('track');
+for(let i=0;i<=MAX_STEP;i++){
+  const d = document.createElement('div'); d.className='dot'; d.dataset.i=i;
+  d.addEventListener('click',()=>{ step=i; render(); });
+  trackEl.appendChild(d);
+}
+
+function render(){
+  step = Math.max(0, Math.min(MAX_STEP, step));
+  document.getElementById('stepN').textContent = `Step ${step} / ${MAX_STEP}`;
+  document.getElementById('stepT').textContent = STEP_META[step].t;
+  document.getElementById('stepW').textContent = STEP_META[step].w;
+  document.getElementById('prevBtn').disabled = step===0;
+  document.getElementById('nextBtn').disabled = step===MAX_STEP;
+
+  Object.keys(REVEAL).forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(REVEAL[id] <= step) el.classList.add('in'); else el.classList.remove('in');
+  });
+
+  document.querySelectorAll('.dot').forEach(d=>{
+    const i = parseInt(d.dataset.i);
+    d.classList.toggle('now', i===step);
+    d.classList.toggle('done', i<step);
+  });
+
+  drawLines();
+}
+document.getElementById('prevBtn').addEventListener('click',()=>{step--;render();});
+document.getElementById('nextBtn').addEventListener('click',()=>{step++;render();});
+document.getElementById('jumpAll').addEventListener('click',()=>{step=MAX_STEP;render();});
+document.getElementById('jumpReset').addEventListener('click',()=>{step=0;render();});
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('v-build').classList.contains('active')) return;
+  if(e.key==='ArrowRight'){step=Math.min(MAX_STEP,step+1);render();}
+  if(e.key==='ArrowLeft'){step=Math.max(0,step-1);render();}
+});
+
+// ---- Connector engine ----
+// edgePoint: where a straight line from this box's center toward (otherCx,otherCy)
+// crosses the box's own border. Used for both ends of every connection so lines
+// terminate exactly at box edges regardless of box size or position.
+function edgePoint(rect, otherCx, otherCy){
+  const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+  const dx = otherCx - cx, dy = otherCy - cy;
+  if(dx===0 && dy===0) return {x:cx,y:cy};
+  const hw = rect.width/2, hh = rect.height/2;
+  const scale = 1/Math.max(Math.abs(dx)/hw, Math.abs(dy)/hh);
+  return {x:cx+dx*scale, y:cy+dy*scale};
+}
+
+function ensureDefs(svg){
+  if(svg.querySelector('defs')) return;
+  const defs = document.createElementNS('http://www.w3.org/2000/svg','defs');
+  Object.keys(COLORS).forEach(k=>{
+    const m = document.createElementNS('http://www.w3.org/2000/svg','marker');
+    m.setAttribute('id','arrow-'+k);
+    m.setAttribute('markerWidth','8'); m.setAttribute('markerHeight','8');
+    m.setAttribute('refX','6'); m.setAttribute('refY','3');
+    m.setAttribute('orient','auto'); m.setAttribute('markerUnits','userSpaceOnUse');
+    const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d','M0,0 L6,3 L0,6 Z'); p.setAttribute('fill',COLORS[k]);
+    m.appendChild(p); defs.appendChild(m);
+  });
+  svg.appendChild(defs);
+}
+
+function drawLines(){
+  const svg = document.getElementById('lines');
+  const canvas = document.getElementById('canvas');
+  const cRect = canvas.getBoundingClientRect();
+  svg.innerHTML='';
+  ensureDefs(svg);
+
+  CONNECTIONS.forEach(c=>{
+    const fromEl = document.getElementById(c.from), toEl = document.getElementById(c.to);
+    if(!fromEl||!toEl) return;
+    if(c.step > step) return;
+    if(!fromEl.classList.contains('in') || !toEl.classList.contains('in')) return;
+
+    const rA = fromEl.getBoundingClientRect(), rB = toEl.getBoundingClientRect();
+    const cAx=rA.left+rA.width/2-cRect.left, cAy=rA.top+rA.height/2-cRect.top;
+    const cBx=rB.left+rB.width/2-cRect.left, cBy=rB.top+rB.height/2-cRect.top;
+    const pA = edgePoint({left:rA.left-cRect.left,top:rA.top-cRect.top,width:rA.width,height:rA.height}, cBx, cBy);
+    const pB = edgePoint({left:rB.left-cRect.left,top:rB.top-cRect.top,width:rB.width,height:rB.height}, cAx, cAy);
+
+    const dx = pB.x-pA.x, dy = pB.y-pA.y;
+    let c1x,c1y,c2x,c2y;
+    if(Math.abs(dy) > Math.abs(dx)){
+      // vertical-dominant: gentle S-curve, stay near each endpoint's own x for a while
+      c1x = pA.x; c1y = pA.y + dy*0.5;
+      c2x = pB.x; c2y = pB.y - dy*0.5;
+    } else {
+      // horizontal-dominant: ARCH OVER instead of cutting a straight diagonal —
+      // a flat diagonal here slices through whatever boxes sit between source and
+      // target (this bit us hard building the first version of this template; see
+      // references/design-system.md before "fixing" this back to a straight line).
+      const bow = Math.min(90, Math.max(26, Math.abs(dx)*0.24));
+      const topY = Math.min(pA.y,pB.y) - bow;
+      c1x = pA.x + dx*0.33; c1y = topY;
+      c2x = pA.x + dx*0.67; c2y = topY;
+    }
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', `M ${pA.x},${pA.y} C ${c1x},${c1y} ${c2x},${c2y} ${pB.x},${pB.y}`);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke', COLORS[c.color] || c.color);
+    path.setAttribute('stroke-width', c.color==='amber'?'1.2':'1.4');
+    if(c.dash) path.setAttribute('stroke-dasharray','4,3');
+    path.setAttribute('marker-end', `url(#arrow-${c.color})`);
+    path.setAttribute('opacity','0.85');
+    path.dataset.from=c.from; path.dataset.to=c.to;
+    svg.appendChild(path);
+
+    if(c.label){
+      // Label sits at parameter t along the actual cubic bezier (not the naive
+      // midpoint of the endpoints) so it tracks the visible curve, including the
+      // arch-over case above. Override labelT per-connection when a label still
+      // lands on top of unrelated content — see references/design-system.md.
+      const t = (typeof c.labelT==='number') ? c.labelT : 0.5;
+      const omt = 1-t;
+      const midX = omt*omt*omt*pA.x + 3*omt*omt*t*c1x + 3*omt*t*t*c2x + t*t*t*pB.x;
+      const midY = omt*omt*omt*pA.y + 3*omt*omt*t*c1y + 3*omt*t*t*c2y + t*t*t*pB.y;
+      const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.setAttribute('x',midX); txt.setAttribute('y',midY);
+      txt.setAttribute('text-anchor','middle');
+      txt.setAttribute('font-family','ui-monospace, SF Mono, Menlo, monospace');
+      txt.setAttribute('font-size','9.5');
+      txt.setAttribute('fill', COLORS[c.color] || c.color);
+      txt.textContent = c.label;
+      const bbox_est = c.label.length*5.6;
+      const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rect.setAttribute('x',midX-bbox_est/2-4); rect.setAttribute('y',midY-10);
+      rect.setAttribute('width',bbox_est+8); rect.setAttribute('height',14);
+      rect.setAttribute('fill','#f6f6f3'); rect.setAttribute('opacity','0.92');
+      svg.appendChild(rect); svg.appendChild(txt);
+    }
+  });
+
+  // Repaint the svg as the LAST child of canvas every time, so lines/labels sit
+  // above the dashed boundary chrome (which otherwise, being later in the DOM,
+  // paints over them). pointer-events:none on the svg means this never blocks
+  // clicks on the boxes underneath.
+  canvas.appendChild(svg);
+}
+
+document.getElementById('canvas').addEventListener('mouseover', e=>{
+  const node = e.target.closest('.node, .boundary.cluster');
+  if(!node) return;
+  const id = node.id;
+  document.querySelectorAll('#lines path').forEach(p=>{
+    p.style.opacity = (p.dataset.from===id||p.dataset.to===id) ? '1' : '0.08';
+  });
+});
+document.getElementById('canvas').addEventListener('mouseout', e=>{
+  const node = e.target.closest('.node, .boundary.cluster');
+  if(!node) return;
+  document.querySelectorAll('#lines path').forEach(p=>p.style.opacity='0.85');
+});
+
+document.getElementById('canvas').addEventListener('click', e=>{
+  const node = e.target.closest('.node');
+  if(!node || !NODE_DETAIL[node.id]) return;
+  openDrawer(node.id);
+});
+
+function openDrawer(id){
+  const d = NODE_DETAIL[id];
+  if(!d) return;
+  document.getElementById('dwKicker').textContent = d.kicker;
+  document.getElementById('dwTitle').textContent = d.title;
+  document.getElementById('dwWhy').textContent = d.why;
+  const ul = document.getElementById('dwList'); ul.innerHTML='';
+  d.cfg.forEach(c=>{ const li=document.createElement('li'); li.textContent=c; ul.appendChild(li); });
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+document.getElementById('drawerClose').addEventListener('click', closeDrawer);
+document.getElementById('scrim').addEventListener('click', closeDrawer);
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('scrim').classList.remove('open');
+}
+window.closeDrawer = closeDrawer; // exposed for automated QA scripts
+
+window.addEventListener('resize', ()=>{ if(document.getElementById('v-build').classList.contains('active')) drawLines(); });
+
+render();
+
+/* =========================================================
+   Tab 3 — pipeline
+   ========================================================= */
+const pipeEl = document.getElementById('pipe');
+PIPE.forEach((s,i)=>{
+  const el = document.createElement('div'); el.className='pipe-step'; el.dataset.i=i+1;
+  el.innerHTML = `<div class="num">Step ${i+1}</div><h4>${s.t}</h4><p>${s.p}</p><code>${s.code}</code>`;
+  pipeEl.appendChild(el);
+});
+let step2 = 0;
+function render2(){
+  step2 = Math.max(0, Math.min(PIPE.length, step2));
+  document.getElementById('stepN2').textContent = `Step ${step2} / ${PIPE.length}`;
+  document.getElementById('stepT2').textContent = step2===0? 'Start' : PIPE[step2-1].t;
+  document.getElementById('prevBtn2').disabled = step2===0;
+  document.getElementById('nextBtn2').disabled = step2===PIPE.length;
+  document.querySelectorAll('.pipe-step').forEach(el=>{
+    el.classList.toggle('in', parseInt(el.dataset.i)<=step2);
+  });
+}
+document.getElementById('prevBtn2').addEventListener('click',()=>{step2--;render2();});
+document.getElementById('nextBtn2').addEventListener('click',()=>{step2++;render2();});
+document.getElementById('jumpAll2').addEventListener('click',()=>{step2=PIPE.length;render2();});
+render2();
+</script>
+</body>
+</html>
